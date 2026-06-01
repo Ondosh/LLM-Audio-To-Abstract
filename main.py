@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 import os
+from pathlib import Path
 
-_nvidia_base = r"C:\Users\Ondosh\PycharmProjects\LLM-Audio\.venv\Lib\site-packages\nvidia"
+#_nvidia_base = r"C:\Users\Ondosh\PycharmProjects\LLM-Audio\.venv\Lib\site-packages\nvidia" - shitty path
+
+_nvidia_base = Path(__file__).parent  / ".venv" / "Lib" / "site-packages" / "nvidia"
 for _d in [r"cublas\bin", r"cudnn\bin", r"cuda_runtime\bin", r"cuda_nvrtc\bin"]:
     _full = os.path.join(_nvidia_base, _d)
     if os.path.exists(_full):
@@ -13,15 +16,17 @@ Meeting summarizer pipeline with per-stage caching:
 
 Каждый этап сохраняется рядом с исходным файлом.
 При повторном запуске уже готовые этапы пропускаются.
+Every stage is saving near original file. If this file was already tried to process,
+it will skip stages which was completed.
 
 Usage:
     python main.py meeting.mp4
     python main.py meeting.mp3
     python main.py meeting.wav
     python main.py meeting.mp4 --model mistral-small3.1:24b --lang ru
-    python main.py meeting.mp4 --force-transcribe   # перетранскрибировать заново
-    python main.py meeting.mp4 --force-summary      # переделать конспект заново
-    python main.py meeting.mp4 --force              # всё заново
+    python main.py meeting.mp4 --force-transcribe   # transcribe again
+    python main.py meeting.mp4 --force-summary      # make summary again
+    python main.py meeting.mp4 --force              # again all
 """
 
 import argparse
@@ -76,7 +81,7 @@ def detect_input_type(input_path: Path) -> str:
         return "audio"
     if suffix == WAV_EXTENSION:
         return "wav"
-    print(f"Ошибка: неподдерживаемый формат файла '{suffix}'.")
+    print(f"ERROR: unsupported format of file: '{suffix}'.")
     print(f"  Видео: {', '.join(sorted(VIDEO_EXTENSIONS))}")
     print(f"  Аудио: {', '.join(sorted(AUDIO_EXTENSIONS))}")
     print(f"  WAV:   .wav")
