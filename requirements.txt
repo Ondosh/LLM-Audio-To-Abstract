@@ -1,0 +1,6 @@
+faster-whisper>=1.0.0
+requests>=2.31.0
+
+# CUDA-библиотеки для GPU-ускорения (опционально, но нужны если есть NVIDIA GPU)
+nvidia-cublas-cu12
+nvidia-cudnn-cu12

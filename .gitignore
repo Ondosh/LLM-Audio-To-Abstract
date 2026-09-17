@@ -1,2 +1,24 @@
 .idea
 .venv
+
+# Медиафайлы и артефакты пайплайна — не хранить в git
+*.wav
+*.mp3
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.webm
+*.m2ts
+*.ts
+*.m4a
+*.flac
+*.ogg
+*.aac
+*.opus
+*.wma
+*_transcript.txt
+*_summary.md
+
+__pycache__
+*.pyc

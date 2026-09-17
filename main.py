@@ -1,14 +1,77 @@
 #!/usr/bin/env python3
 import os
+import platform
 from pathlib import Path
 
-#_nvidia_base = r"C:\Users\Ondosh\PycharmProjects\LLM-Audio\.venv\Lib\site-packages\nvidia" - shitty path
 
-_nvidia_base = Path(__file__).parent  / ".venv" / "Lib" / "site-packages" / "nvidia"
-for _d in [r"cublas\bin", r"cudnn\bin", r"cuda_runtime\bin", r"cuda_nvrtc\bin"]:
-    _full = os.path.join(_nvidia_base, _d)
-    if os.path.exists(_full):
-        os.add_dll_directory(_full)
+# ─────────────────────────────────────────
+# Настройка путей к CUDA/cuDNN библиотекам NVIDIA
+# (кроссплатформенно: Windows / Linux / macOS)
+# ─────────────────────────────────────────
+def _setup_nvidia_paths() -> None:
+    venv_root = Path(__file__).parent / ".venv"
+    is_windows = platform.system() == "Windows"
+
+    # Разные venv раскладывают site-packages по-разному
+    if is_windows:
+        site_packages = venv_root / "Lib" / "site-packages"
+    else:
+        # linux/macos: .venv/lib/python3.X/site-packages
+        lib_dir = venv_root / "lib"
+        if not lib_dir.exists():
+            return
+        py_dirs = sorted(lib_dir.glob("python3.*"))
+        if not py_dirs:
+            return
+        site_packages = py_dirs[0] / "site-packages"
+
+    debug = os.environ.get("MS_DEBUG_NVIDIA") == "1"
+
+    nvidia_base = site_packages / "nvidia"
+    if not nvidia_base.exists():
+        if debug:
+            print(f"[nvidia-paths] не найдена директория: {nvidia_base}")
+            print("[nvidia-paths] пакеты nvidia-cublas-cu12 / nvidia-cudnn-cu12 не установлены в venv")
+        return
+
+    if is_windows:
+        subdirs = [Path("cublas") / "bin", Path("cudnn") / "bin",
+                   Path("cuda_runtime") / "bin", Path("cuda_nvrtc") / "bin"]
+    else:
+        subdirs = [Path("cublas") / "lib", Path("cudnn") / "lib",
+                   Path("cuda_runtime") / "lib", Path("cuda_nvrtc") / "lib"]
+
+    found_any = False
+    for sub in subdirs:
+        full = nvidia_base / sub
+        if not full.exists():
+            if debug:
+                print(f"[nvidia-paths] нет: {full}")
+            continue
+        found_any = True
+        if debug:
+            print(f"[nvidia-paths] подключаю: {full}")
+        if is_windows:
+            full_abs = str(full.resolve())
+            # Windows: официальный способ подключить директорию с DLL...
+            os.add_dll_directory(full_abs)
+            # ...но ctranslate2 (движок faster-whisper) при подгрузке ВЛОЖЕННЫХ
+            # зависимостей (cublas -> cudart и т.п.) полагается на PATH,
+            # а не на add_dll_directory — поэтому дублируем и туда.
+            os.environ["PATH"] = full_abs + os.pathsep + os.environ.get("PATH", "")
+        else:
+            # Linux/macOS: добавляем в LD_LIBRARY_PATH / DYLD_LIBRARY_PATH
+            # Важно: работает только если библиотеки подгружаются ПОСЛЕ этой правки,
+            # поэтому блок должен вызываться до импорта torch/ctranslate2 и т.п.
+            var = "DYLD_LIBRARY_PATH" if platform.system() == "Darwin" else "LD_LIBRARY_PATH"
+            current = os.environ.get(var, "")
+            os.environ[var] = f"{full}{os.pathsep}{current}" if current else str(full)
+
+    if not found_any and debug:
+        print("[nvidia-paths] ни одна CUDA-директория не найдена — GPU-режим, скорее всего, не заработает")
+
+
+_setup_nvidia_paths()
 
 """
 Meeting summarizer pipeline with per-stage caching:
@@ -159,7 +222,21 @@ def transcribe(audio_path: Path, transcript_path: Path, whisper_model: str, lang
         print("Ошибка: установи faster-whisper:  pip install faster-whisper")
         sys.exit(1)
 
-    model = WhisperModel(whisper_model, device="auto", compute_type="auto")
+    forced_device = os.environ.get("MS_DEVICE")  # "cpu" / "cuda", если нужно форсировать
+    device = forced_device or "auto"
+
+    try:
+        model = WhisperModel(whisper_model, device=device, compute_type="auto")
+    except RuntimeError as e:
+        msg = str(e)
+        # Типичная ошибка: CUDA-библиотеки (cublas/cudnn) не найдены или не грузятся
+        if device != "cpu" and ("cublas" in msg.lower() or "cudnn" in msg.lower() or "cuda" in msg.lower()):
+            print(f"    ⚠ Не удалось запустить на GPU ({msg.strip()})")
+            print("    → Переключаюсь на CPU (будет медленнее). "
+                  "Чтобы отладить GPU: установи переменную MS_DEBUG_NVIDIA=1")
+            model = WhisperModel(whisper_model, device="cpu", compute_type="int8")
+        else:
+            raise
 
     kwargs = {"beam_size": 5}
     if language:
